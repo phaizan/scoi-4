@@ -34,7 +34,7 @@ namespace scoi_4
 
             int size = (int)nudKernelSize.Value;
             float[,] kernel = ParseKernel(txtKernel.Text, size, size);
-            var processor = new ImageProcessor(curImage);
+            var processor = new ImageProcessor(origImage);
 
             curImage = processor.ToBitmap();
             pictureBox1.Image = curImage;
@@ -88,99 +88,121 @@ namespace scoi_4
             pictureBox1.Image = curImage;
         }
 
-
         private void btnApplyMedian_Click(object sender, EventArgs e)
         {
-            if (origImage == null)
-                return;
+            if (origImage == null) return;
 
             int size = (int)nudKernelSize.Value;
-            if (size % 2 == 0) size++; // делаем нечётным, если вдруг пользователь выбрал чётное
+            if (size % 2 == 0) size++; // нечётный
 
-            var processor = new ImageProcessor(origImage);
-            var outputBytes = new byte[processor.Pixels.Length];
             int radius = size / 2;
+            var processor = new ImageProcessor(origImage);
+            byte[] input = processor.Pixels;
+            byte[] output = new byte[input.Length];
 
-            for (int y = 0; y < processor.Height; y++)
+            int width = processor.Width;
+            int height = processor.Height;
+            int stride = processor.Stride;
+            int bpp = processor.BytesPerPixel;
+
+            unsafe
             {
-                for (int x = 0; x < processor.Width; x++)
+                fixed (byte* srcStart = input)
+                fixed (byte* dstStart = output)
                 {
-                    for (int c = 0; c < 3; c++) // R, G, B
+                    for (int y = 0; y < height; y++)
                     {
-                        int[] window = new int[size * size];
-                        int index = 0;
-
-                        for (int ky = -radius; ky <= radius; ky++)
+                        for (int x = 0; x < width; x++)
                         {
-                            for (int kx = -radius; kx <= radius; kx++)
+                            for (int c = 0; c < 3; c++)
                             {
-                                int px = Reflect(x + kx, processor.Width);
-                                int py = Reflect(y + ky, processor.Height);
-                                window[index++] = processor.GetPixelSafe(px, py, c);
+                                int[] window = new int[size * size];
+                                int index = 0;
+
+                                for (int ky = -radius; ky <= radius; ky++)
+                                {
+                                    int py = Reflect(y + ky, height);
+                                    for (int kx = -radius; kx <= radius; kx++)
+                                    {
+                                        int px = Reflect(x + kx, width);
+                                        byte* p = srcStart + py * stride + px * bpp;
+                                        window[index++] = p[c];
+                                    }
+                                }
+
+                                int median = QuickSelect(window, window.Length / 2);
+                                byte* dstPixel = dstStart + y * stride + x * bpp;
+                                dstPixel[c] = (byte)median;
                             }
                         }
-
-                        int median = QuickSelect(window, window.Length / 2);
-                        int outIndex = y * processor.Stride + x * processor.BytesPerPixel + c;
-                        outputBytes[outIndex] = (byte)median;
                     }
                 }
             }
 
-            processor.Pixels = outputBytes;
+            processor.Pixels = output;
             curImage = processor.ToBitmap();
             pictureBox1.Image = curImage;
         }
+
+
 
         private void btnApplyGaussian_Click(object sender, EventArgs e)
         {
-            if (origImage == null)
-                return;
+            if (origImage == null) return;
 
             int size = (int)nudKernelSize.Value;
-            if (size % 2 == 0) size++; // гарантируем нечётность
+            if (size % 2 == 0) size++; // нечётный
             float sigma = (float)nudSigma.Value;
 
             float[,] kernel = GenerateGaussianKernel(size, sigma);
-
-
             var processor = new ImageProcessor(origImage);
-            var outputBytes = new byte[processor.Pixels.Length];
+            byte[] input = processor.Pixels;
+            byte[] output = new byte[input.Length];
+
+            int width = processor.Width;
+            int height = processor.Height;
+            int stride = processor.Stride;
+            int bpp = processor.BytesPerPixel;
             int radius = size / 2;
 
-            for (int y = 0; y < processor.Height; y++)
+            unsafe
             {
-                for (int x = 0; x < processor.Width; x++)
+                fixed (byte* srcStart = input)
+                fixed (byte* dstStart = output)
                 {
-                    float[] rgb = new float[3];
-
-                    for (int ky = -radius; ky <= radius; ky++)
+                    for (int y = 0; y < height; y++)
                     {
-                        for (int kx = -radius; kx <= radius; kx++)
+                        for (int x = 0; x < width; x++)
                         {
-                            float weight = kernel[ky + radius, kx + radius];
-                            int px = Reflect(x + kx, processor.Width);
-                            int py = Reflect(y + ky, processor.Height);
-                            for (int c = 0; c < 3; c++)
-                            {
-                                rgb[c] += weight * processor.GetPixelSafe(px, py, c);
-                            }
-                        }
-                    }
+                            float[] sum = new float[3];
 
-                    for (int c = 0; c < 3; c++)
-                    {
-                        int index = y * processor.Stride + x * processor.BytesPerPixel + c;
-                        outputBytes[index] = (byte)Math.Min(255, Math.Max(0, rgb[c]));
+                            for (int ky = -radius; ky <= radius; ky++)
+                            {
+                                int py = Reflect(y + ky, height);
+                                for (int kx = -radius; kx <= radius; kx++)
+                                {
+                                    int px = Reflect(x + kx, width);
+                                    float weight = kernel[ky + radius, kx + radius];
+
+                                    byte* srcPixel = srcStart + py * stride + px * bpp;
+                                    for (int c = 0; c < 3; c++)
+                                        sum[c] += weight * srcPixel[c];
+                                }
+                            }
+
+                            byte* dstPixel = dstStart + y * stride + x * bpp;
+                            for (int c = 0; c < 3; c++)
+                                dstPixel[c] = (byte)Math.Clamp((int)sum[c], 0, 255);
+                        }
                     }
                 }
             }
 
-            processor.Pixels = outputBytes;
+            processor.Pixels = output;
             curImage = processor.ToBitmap();
             pictureBox1.Image = curImage;
-
         }
+
 
 
 
