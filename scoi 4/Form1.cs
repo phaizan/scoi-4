@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Drawing.Imaging;
+using System.Text;
 
 namespace scoi_4
 {
@@ -26,45 +27,67 @@ namespace scoi_4
             }
         }
 
-        private void btnApplyLinear_Click(object sender, EventArgs e)
+        public void btnApplyLinear_Click(object sender, EventArgs e)
         {
             if (origImage == null)
                 return;
+
             int size = (int)nudKernelSize.Value;
             float[,] kernel = ParseKernel(txtKernel.Text, size, size);
-            var processor = new ImageProcessor(origImage);
-            var outputBytes = new byte[processor.Pixels.Length];
-            int radiusX = kernel.GetLength(0) / 2;
-            int radiusY = kernel.GetLength(1) / 2;
-            for (int y = 0; y < processor.Height; y++)
+            var processor = new ImageProcessor(curImage);
+
+            curImage = processor.ToBitmap();
+            pictureBox1.Image = curImage;
+            int width = processor.Width;
+            int height = processor.Height;
+            int kernelW = kernel.GetLength(1);
+            int kernelH = kernel.GetLength(0);
+            int radiusX = kernelW / 2;
+            int radiusY = kernelH / 2;
+
+            int bytesPerPixel = processor.BytesPerPixel;
+            int stride = processor.Stride;
+            byte[] input = processor.Pixels;
+            byte[] output = new byte[input.Length];
+
+            unsafe
             {
-                for (int x = 0; x < processor.Width; x++)
+                fixed (byte* srcStart = input)
+                fixed (byte* dstStart = output)
                 {
-                    float[] rgb = new float[3];
-
-                    for (int ky = -radiusY; ky <= radiusY; ky++)
+                    for (int y = 0; y < height; y++)
                     {
-                        for (int kx = -radiusX; kx <= radiusX; kx++)
+                        for (int x = 0; x < width; x++)
                         {
-                            float weight = kernel[ky + radiusY, kx + radiusX];
-                            for (int c = 0; c < 3; c++)
-                            {
-                                rgb[c] += weight * processor.GetPixelSafe(x + kx, y + ky, c);
-                            }
-                        }
-                    }
+                            float[] sum = new float[3];
 
-                    for (int c = 0; c < 3; c++)
-                    {
-                        int index = y * processor.Stride + x * processor.BytesPerPixel + c;
-                        outputBytes[index] = (byte)Math.Min(255, Math.Max(0, rgb[c]));
+                            for (int ky = -radiusY; ky <= radiusY; ky++)
+                            {
+                                int iy = Math.Clamp(y + ky, 0, height - 1);
+                                for (int kx = -radiusX; kx <= radiusX; kx++)
+                                {
+                                    int ix = Math.Clamp(x + kx, 0, width - 1);
+                                    float weight = kernel[ky + radiusY, kx + radiusX];
+
+                                    byte* srcPixel = srcStart + iy * stride + ix * bytesPerPixel;
+                                    for (int c = 0; c < 3; c++)
+                                        sum[c] += weight * srcPixel[c];
+                                }
+                            }
+
+                            byte* dstPixel = dstStart + y * stride + x * bytesPerPixel;
+                            for (int c = 0; c < 3; c++)
+                                dstPixel[c] = (byte)Math.Clamp((int)sum[c], 0, 255);
+                        }
                     }
                 }
             }
-            processor.Pixels = outputBytes;
+
+            processor.Pixels = output;
             curImage = processor.ToBitmap();
             pictureBox1.Image = curImage;
         }
+
 
         private void btnApplyMedian_Click(object sender, EventArgs e)
         {
@@ -268,6 +291,8 @@ namespace scoi_4
         {
             pictureBox1.Image = origImage;
         }
+
+      
     }
 }
 
