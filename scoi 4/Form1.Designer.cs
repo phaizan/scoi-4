@@ -107,6 +107,7 @@
             // 
             // nudSigma
             // 
+            nudSigma.DecimalPlaces = 1;
             nudSigma.Increment = new decimal(new int[] { 1, 0, 0, 65536 });
             nudSigma.Location = new Point(608, 91);
             nudSigma.Maximum = new decimal(new int[] { 10, 0, 0, 0 });
